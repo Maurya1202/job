@@ -1,5 +1,5 @@
 import streamlit as st
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 import re, time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
