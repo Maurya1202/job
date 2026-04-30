@@ -205,55 +205,10 @@ PORTAL_COLORS = {
     "Cutshort":    "#ea580c",
 }
 
-PORTAL_QUERIES = {
-    # Scoped to actual job-listing URL paths to avoid social posts / articles
-    "Naukri":      'site:naukri.com/job-listings "{role}" {location}',
-    "LinkedIn":    'site:linkedin.com/jobs/view "{role}" {location} India',
-    "Indeed":      'site:indeed.co.in/viewjob "{role}" {location}',
-    "Internshala": 'site:internshala.com/job/detail "{role}" {location}',
-    "Shine":       'site:shine.com/job-search "{role}" {location}',
-    "Foundit":     'site:foundit.in/job "{role}" {location}',
-    "TimesJobs":   'site:timesjobs.com/job-detail "{role}" {location}',
-    "Glassdoor":   'site:glassdoor.co.in/job-listing "{role}" {location}',
-    "Wellfound":   'site:wellfound.com/jobs "{role}" India',
-    "Instahyre":   'site:instahyre.com/job "{role}" {location}',
-    "Hirist":      'site:hirist.tech/j "{role}" {location}',
-    "Monster":     'site:monsterindia.com/job "{role}" {location}',
-    "Cutshort":    'site:cutshort.io/jobs "{role}" {location}',
-}
 
-# URL must contain at least one of these substrings to be accepted as a real job listing
-PORTAL_URL_ALLOWLIST = {
-    "Naukri":      ["naukri.com/job-listings", "naukri.com/jobs/"],
-    "LinkedIn":    ["linkedin.com/jobs/view"],
-    "Indeed":      ["indeed.co.in/viewjob", "indeed.co.in/jobs/"],
-    "Internshala": ["internshala.com/job/", "internshala.com/jobs/"],
-    "Shine":       ["shine.com/job-search", "shine.com/jobs/"],
-    "Foundit":     ["foundit.in/job/", "foundit.in/jobs/"],
-    "TimesJobs":   ["timesjobs.com/job-detail", "timesjobs.com/jobs/"],
-    "Glassdoor":   ["glassdoor.co.in/job-listing", "glassdoor.co.in/Jobs/"],
-    "Wellfound":   ["wellfound.com/jobs/", "wellfound.com/job/"],
-    "Instahyre":   ["instahyre.com/job/", "instahyre.com/jobs/"],
-    "Hirist":      ["hirist.tech/j/", "hirist.tech/jobs/"],
-    "Monster":     ["monsterindia.com/job/", "monsterindia.com/srp/"],
-    "Cutshort":    ["cutshort.io/jobs/", "cutshort.io/job/"],
-}
-
-# URL fragments that always indicate non-job content — block regardless of portal
-GLOBAL_URL_BLOCKLIST = [
-    "/posts/", "/post/", "/pulse/", "/article/", "/articles/",
-    "/blog/", "/blogs/", "/news/", "/in/",         # linkedin profiles
-    "/company/", "/school/", "/groups/",            # linkedin non-job pages
-    "quora.com", "reddit.com", "youtube.com",
-    "twitter.com", "facebook.com", "instagram.com",
-    "wikipedia.org", "wiki/", "forum", ".pdf",
-]
-
-WORK_MODE_KEYWORDS = {
-    "Remote":           ["remote", "work from home", "wfh"],
-    "Hybrid":           ["hybrid"],
-    "On-site / Office": ["on-site", "onsite", "office", "in-office"],
-}
+# ══════════════════════════════════════════════════════════════════
+#  HELPERS
+# ══════════════════════════════════════════════════════════════════
 
 SKILLS_MAP = {
     "Data Analyst":         ["SQL", "Power BI", "Excel", "Python", "Tableau", "Data Visualization"],
@@ -273,63 +228,76 @@ SKILLS_MAP = {
     "Tableau Developer":    ["Tableau", "SQL", "Data Visualization", "Python", "ETL", "Dashboards"],
 }
 
-# Map UI date keys → Serper tbs (Google date range) parameters
-_SERPER_DATE_MAP = {
-    "d":  "qdr:d",
-    "d3": "qdr:d3",
-    "w":  "qdr:w",
-    "w2": "qdr:w2",
-    "m":  "qdr:m",
-    None: None,
+# ══════════════════════════════════════════════════════════════════
+#  DDG HTML SCRAPER  — no API key, no library, works on Streamlit Cloud
+#  Hits DuckDuckGo's plain-HTML endpoint with real browser headers
+# ══════════════════════════════════════════════════════════════════
+
+_DDG_URL = "https://html.duckduckgo.com/html/"
+
+_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-IN,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Referer":         "https://duckduckgo.com/",
+    "Origin":          "https://duckduckgo.com",
+    "Content-Type":    "application/x-www-form-urlencoded",
 }
 
-# ══════════════════════════════════════════════════════════════════
-#  SERPER SEARCH  (works on Streamlit Cloud — no IP blocking)
-#  Get free API key at https://serper.dev  (2,500 free searches/month)
-#  Add to Streamlit secrets:  SERPER_API_KEY = "your_key_here"
-# ══════════════════════════════════════════════════════════════════
-def serper_search(query: str, tbs: str | None, num: int = 10) -> list[dict]:
-    """Call Serper.dev Google Search API. Returns list of {title, href, body}."""
-    # Key priority: session_state (sidebar input) → st.secrets
-    api_key = (
-        st.session_state.get("serper_api_key", "")
-        or (st.secrets.get("SERPER_API_KEY", "") if hasattr(st, "secrets") else "")
-    )
-    if not api_key:
-        return []   # warning already shown in sidebar
+# Map UI date keys → DDG df parameter
+_DDG_DATE_MAP = {
+    "d":  "d",
+    "d3": "d",
+    "w":  "w",
+    "w2": "m",
+    "m":  "m",
+    None: "",
+}
 
-    payload = {"q": query, "num": num, "gl": "in", "hl": "en"}
-    if tbs:
-        payload["tbs"] = tbs
+def ddg_search(query: str, days_key: str, num: int = 15) -> list[dict]:
+    """
+    Scrape DuckDuckGo HTML endpoint. No API key needed.
+    Returns list of {title, href, body}.
+    """
+    df = _DDG_DATE_MAP.get(days_key, "")
+    data = {"q": query, "b": "", "kl": "in-en"}
+    if df:
+        data["df"] = df
 
+    results = []
     try:
         resp = requests.post(
-            "https://google.serper.dev/search",
-            headers={"X-API-KEY": api_key, "Content-Type": "application/json"},
-            json=payload,
-            timeout=10,
+            _DDG_URL, headers=_HEADERS, data=data, timeout=12
         )
-        if resp.status_code == 401:
-            st.error("❌ Serper API key is invalid. Please check your key in the sidebar.")
-            return []
-        if resp.status_code == 429:
-            st.warning("⚠️ Serper rate limit hit — you've used your free quota. Check serper.dev.")
-            return []
         resp.raise_for_status()
-        data = resp.json()
-        results = []
-        for item in data.get("organic", []):
-            results.append({
-                "title": item.get("title", ""),
-                "href":  item.get("link", "#"),
-                "body":  item.get("snippet", ""),
-            })
-        return results
-    except requests.exceptions.Timeout:
-        st.warning("⚠️ Serper request timed out. Try again.")
-        return []
+
+        # Parse result blocks with regex — no BeautifulSoup needed
+        html = resp.text
+
+        # Each result block looks like:
+        # <a class="result__a" href="...">title</a>
+        # <a class="result__snippet">snippet</a>
+        titles   = re.findall(r'class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', html, re.S)
+        snippets = re.findall(r'class="result__snippet"[^>]*>(.*?)</a>', html, re.S)
+
+        for i, (href, raw_title) in enumerate(titles[:num]):
+            title   = re.sub(r'<[^>]+>', '', raw_title).strip()
+            snippet = re.sub(r'<[^>]+>', '', snippets[i]).strip() if i < len(snippets) else ""
+            # DDG sometimes wraps URLs — decode if needed
+            if href.startswith("//duckduckgo.com/l/?uddg="):
+                from urllib.parse import unquote
+                href = unquote(href.split("uddg=")[-1].split("&")[0])
+            if href and title:
+                results.append({"title": title, "href": href, "body": snippet})
     except Exception:
-        return []
+        pass
+    return results
+
 
 # ══════════════════════════════════════════════════════════════════
 #  HELPERS
@@ -413,84 +381,88 @@ def detect_work_mode(text: str) -> str:
         return "Hybrid"
     return "On-site"
 
-def search_one_portal(
-    portal: str, role: str, location: str, exp: str,
-    days_key: str, work_mode: str
-) -> tuple[str, list]:
+def search_one_portal(portal: str, role: str, location: str,
+                      exp: str, days_key: str, work_mode: str) -> tuple[str, list]:
     results = []
     try:
         tmpl  = PORTAL_QUERIES.get(portal, 'site:{portal} "{role}" jobs {location} India')
-        query = tmpl.format(role=role, location=location, portal=portal.lower()+".com")
+        query = tmpl.format(role=role, location=location, portal=portal.lower() + ".com")
 
-        # Experience modifier
         exp_k = exp_key(exp)
-        if exp_k == "fresher":
-            query += " fresher entry level"
-        elif exp_k == "1-3":
-            query += " 1 2 3 years experience"
-        elif exp_k == "3-5":
-            query += " 3 4 5 years senior"
-        elif exp_k == "5plus":
-            query += " senior lead 5+ years"
+        if exp_k == "fresher":  query += " fresher entry level"
+        elif exp_k == "1-3":    query += " 1 2 3 years experience"
+        elif exp_k == "3-5":    query += " 3 4 5 years senior"
+        elif exp_k == "5plus":  query += " senior lead 5+ years"
 
-        # Work mode in query
-        if work_mode == "Remote":
-            query += " remote OR \"work from home\" OR WFH"
-        elif work_mode == "Hybrid":
-            query += " hybrid"
-        elif work_mode == "On-site / Office":
-            query += " onsite OR \"in office\""
+        if work_mode == "Remote":           query += ' remote OR "work from home" OR WFH'
+        elif work_mode == "Hybrid":         query += " hybrid"
+        elif work_mode == "On-site / Office": query += " onsite"
 
-        # Days → Serper tbs date filter
-        tbs = _SERPER_DATE_MAP.get(days_key)
+        raw = ddg_search(query, days_key, num=12)
 
-        # Primary search using Serper (works on Streamlit Cloud)
-        raw = serper_search(query, tbs, num=10)
-
-        # Fallback: broader root-domain query if strict path returns nothing
+        # Fallback: broader query if strict path returns nothing
         if not raw:
-            fallback_q = f'site:{portal.lower()}.com "{role}" {location} jobs'
+            fallback = f'site:{portal.lower()}.com "{role}" {location} jobs'
             time.sleep(0.5)
-            raw = serper_search(fallback_q, tbs, num=10)
+            raw = ddg_search(fallback, days_key, num=12)
 
         for r in raw:
             title = clean_title(r.get("title", ""))
             body  = r.get("body", "")
             url   = r.get("href", "#")
-
             if not title or not url:
                 continue
-
             url_lower = url.lower()
-
-            # 1. Block known non-job URLs globally
             if any(bad in url_lower for bad in GLOBAL_URL_BLOCKLIST):
                 continue
-
-            # 2. For this portal, URL must match at least one known job-listing path
-            allowed_paths = PORTAL_URL_ALLOWLIST.get(portal, [])
-            if allowed_paths and not any(p.lower() in url_lower for p in allowed_paths):
+            allowed = PORTAL_URL_ALLOWLIST.get(portal, [])
+            if allowed and not any(p.lower() in url_lower for p in allowed):
                 continue
-
-            combined_text = title + " " + body
-            mode = detect_work_mode(combined_text)
-
             results.append({
-                "title":     title,
-                "company":   extract_company(title, body),
-                "location":  location,
-                "salary":    extract_salary(body),
-                "exp_raw":   exp,
-                "portal":    portal,          # ← use the searched portal directly
-                "url":       url,
-                "skills":    SKILLS_MAP.get(role, ["SQL", "Python"]),
-                "snippet":   body[:170].strip(),
-                "role":      role,
-                "work_mode": mode,
+                "title":    title,
+                "company":  extract_company(title, body),
+                "location": location,
+                "salary":   extract_salary(body),
+                "exp_raw":  exp,
+                "portal":   portal,
+                "url":      url,
+                "skills":   SKILLS_MAP.get(role, ["SQL", "Python"]),
+                "snippet":  body[:170].strip(),
+                "role":     role,
+                "work_mode": detect_work_mode(title + " " + body),
             })
     except Exception:
         pass
     return portal, results
+
+def run_search(role, location, exp, days_key, work_mode, selected_portals):
+    all_jobs     = {}
+    failed       = []
+    total        = len(selected_portals)
+    prog         = st.progress(0, text="⚡ Searching portals...")
+    done         = [0]
+
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        futures = {
+            ex.submit(search_one_portal, p, role, location, exp, days_key, work_mode): p
+            for p in selected_portals
+        }
+        for fut in as_completed(futures):
+            portal_name, jobs = fut.result()
+            if jobs:
+                all_jobs[portal_name] = jobs
+            else:
+                failed.append(portal_name)
+            done[0] += 1
+            prog.progress(done[0] / total, text=f"✅ {done[0]}/{total} portals searched...")
+
+    prog.progress(1.0, text="🎉 Done!")
+    time.sleep(0.3)
+    prog.empty()
+    if failed:
+        st.warning(f"⚠️ No results from: **{', '.join(failed)}** — try again or widen filters.")
+    return all_jobs
+
 
 # ══════════════════════════════════════════════════════════════════
 #  SESSION STATE
@@ -511,45 +483,6 @@ for key, default in {
 # ══════════════════════════════════════════════════════════════════
 with st.sidebar:
     st.markdown("## 💼 Search Filters")
-    st.markdown("---")
-
-    # ── API KEY ── enter here if not set in Streamlit secrets
-    _secret_key = st.secrets.get("SERPER_API_KEY", "") if hasattr(st, "secrets") else ""
-    if _secret_key:
-        st.success("✅ Serper API key loaded from secrets")
-        api_key_input = _secret_key
-    else:
-        st.warning("⚠️ No API key in secrets")
-        api_key_input = st.text_input(
-            "🔑 Serper API Key",
-            type="password",
-            placeholder="Paste key from serper.dev",
-            help="Get free key at https://serper.dev (2500 searches/month free)"
-        )
-
-    if api_key_input:
-        st.session_state["serper_api_key"] = api_key_input
-        # Test button
-        if st.button("🧪 Test API Key"):
-            try:
-                r = requests.post(
-                    "https://google.serper.dev/search",
-                    headers={"X-API-KEY": api_key_input, "Content-Type": "application/json"},
-                    json={"q": "data analyst jobs India", "num": 1},
-                    timeout=8,
-                )
-                if r.status_code == 200 and r.json().get("organic"):
-                    st.success("✅ API key works! Ready to search.")
-                elif r.status_code == 401:
-                    st.error("❌ Invalid API key — check serper.dev")
-                else:
-                    st.error(f"❌ Error {r.status_code}: {r.text[:120]}")
-            except Exception as e:
-                st.error(f"❌ Connection failed: {e}")
-    else:
-        st.session_state["serper_api_key"] = ""
-        st.info("Get a free API key at [serper.dev](https://serper.dev)")
-
     st.markdown("---")
 
     role       = st.selectbox("🎯 Role",       ROLES)
@@ -601,7 +534,7 @@ with st.sidebar:
 st.markdown("""
 <div class="hero">
   <h1>🔍 DataJobs India</h1>
-  <p>Live job search across 13 portals · Powered by Serper.dev · Always Free</p>
+  <p>Live job search across 13 portals · No API Key · No Login · Always Free</p>
   <div class="chips">
     <span class="chip">Naukri</span>
     <span class="chip">LinkedIn</span>
@@ -624,48 +557,18 @@ st.markdown("""
 #  SEARCH
 # ══════════════════════════════════════════════════════════════════
 if go:
-    if not st.session_state.get("serper_api_key", ""):
-        st.error("❌ Please enter your Serper API key in the sidebar before searching. Get one free at https://serper.dev")
-        st.stop()
     selected = [p for p, v in portal_flags.items() if v]
     if not selected:
         st.warning("Select at least one portal.")
         st.stop()
 
-    st.session_state.all_jobs    = {}
+    st.session_state.all_jobs     = {}
     st.session_state.failed_portals = []
-    st.session_state.searched    = False
+    st.session_state.searched     = False
 
-    prog_bar = st.progress(0, text="⚡ Starting parallel search...")
-    status   = st.empty()
-    done     = [0]
-    total_p  = len(selected)
-
-    with ThreadPoolExecutor(max_workers=3) as ex:
-        futures = {
-            ex.submit(
-                search_one_portal, p, role, location, experience, days_key, work_mode
-            ): p
-            for p in selected
-        }
-        for fut in as_completed(futures):
-            portal_name, jobs = fut.result()
-            if jobs:
-                st.session_state.all_jobs[portal_name] = jobs
-            else:
-                st.session_state.failed_portals.append(portal_name)
-            done[0] += 1
-            pct = done[0] / total_p
-            prog_bar.progress(pct, text=f"✅ {done[0]}/{total_p} portals searched...")
-
-    prog_bar.progress(1.0, text="🎉 Search complete!")
-    time.sleep(0.4)
-    prog_bar.empty()
-    status.empty()
-    # Show portals that returned no results
-    failed = st.session_state.get("failed_portals", [])
-    if failed:
-        st.warning(f"⚠️ No results from: **{', '.join(failed)}** — DuckDuckGo may be rate-limiting these. Try again in a few seconds.")
+    st.session_state.all_jobs = run_search(
+        role, location, experience, days_key, work_mode, selected
+    )
     st.session_state.searched = True
     st.rerun()
 
