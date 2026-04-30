@@ -233,70 +233,80 @@ SKILLS_MAP = {
 #  Hits DuckDuckGo's plain-HTML endpoint with real browser headers
 # ══════════════════════════════════════════════════════════════════
 
-_DDG_URL = "https://html.duckduckgo.com/html/"
+# ══════════════════════════════════════════════════════════════════
+#  SEARXNG  — free public metasearch, JSON API, no API key needed,
+#  works 100% on Streamlit Cloud (not IP-blocked like DuckDuckGo)
+#  Falls back through multiple public instances if one is down
+# ══════════════════════════════════════════════════════════════════
 
-_HEADERS = {
+# Public SearXNG instances — tried in order, first success wins
+_SEARX_INSTANCES = [
+    "https://searx.be",
+    "https://search.mdosch.de",
+    "https://searx.tiekoetter.com",
+    "https://searx.oloke.xyz",
+    "https://searx.fmac.xyz",
+]
+
+_SEARX_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/124.0.0.0 Safari/537.36"
     ),
-    "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-IN,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Referer":         "https://duckduckgo.com/",
-    "Origin":          "https://duckduckgo.com",
-    "Content-Type":    "application/x-www-form-urlencoded",
+    "Accept": "application/json",
 }
 
-# Map UI date keys → DDG df parameter
-_DDG_DATE_MAP = {
-    "d":  "d",
-    "d3": "d",
-    "w":  "w",
-    "w2": "m",
-    "m":  "m",
+# Map UI date keys → SearXNG time_range
+_SEARX_DATE_MAP = {
+    "d":  "day",
+    "d3": "week",
+    "w":  "week",
+    "w2": "month",
+    "m":  "month",
     None: "",
 }
 
-def ddg_search(query: str, days_key: str, num: int = 15) -> list[dict]:
+def searx_search(query: str, days_key: str, num: int = 10) -> list[dict]:
     """
-    Scrape DuckDuckGo HTML endpoint. No API key needed.
+    Search via public SearXNG instances (JSON API).
+    No API key. Works on Streamlit Cloud.
     Returns list of {title, href, body}.
     """
-    df = _DDG_DATE_MAP.get(days_key, "")
-    data = {"q": query, "b": "", "kl": "in-en"}
-    if df:
-        data["df"] = df
+    time_range = _SEARX_DATE_MAP.get(days_key, "")
+    params = {
+        "q":       query,
+        "format":  "json",
+        "language":"en-IN",
+        "safesearch": 0,
+    }
+    if time_range:
+        params["time_range"] = time_range
 
-    results = []
-    try:
-        resp = requests.post(
-            _DDG_URL, headers=_HEADERS, data=data, timeout=12
-        )
-        resp.raise_for_status()
+    for instance in _SEARX_INSTANCES:
+        try:
+            resp = requests.get(
+                f"{instance}/search",
+                params=params,
+                headers=_SEARX_HEADERS,
+                timeout=10,
+            )
+            if resp.status_code != 200:
+                continue
+            data = resp.json()
+            results = []
+            for item in data.get("results", [])[:num]:
+                url   = item.get("url", "#")
+                title = item.get("title", "")
+                body  = item.get("content", "")
+                if url and title:
+                    results.append({"title": title, "href": url, "body": body})
+            if results:
+                return results   # got results — no need to try next instance
+        except Exception:
+            continue             # try next instance
 
-        # Parse result blocks with regex — no BeautifulSoup needed
-        html = resp.text
-
-        # Each result block looks like:
-        # <a class="result__a" href="...">title</a>
-        # <a class="result__snippet">snippet</a>
-        titles   = re.findall(r'class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', html, re.S)
-        snippets = re.findall(r'class="result__snippet"[^>]*>(.*?)</a>', html, re.S)
-
-        for i, (href, raw_title) in enumerate(titles[:num]):
-            title   = re.sub(r'<[^>]+>', '', raw_title).strip()
-            snippet = re.sub(r'<[^>]+>', '', snippets[i]).strip() if i < len(snippets) else ""
-            # DDG sometimes wraps URLs — decode if needed
-            if href.startswith("//duckduckgo.com/l/?uddg="):
-                from urllib.parse import unquote
-                href = unquote(href.split("uddg=")[-1].split("&")[0])
-            if href and title:
-                results.append({"title": title, "href": href, "body": snippet})
-    except Exception:
-        pass
-    return results
+    return []  # all instances failed
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -398,13 +408,12 @@ def search_one_portal(portal: str, role: str, location: str,
         elif work_mode == "Hybrid":         query += " hybrid"
         elif work_mode == "On-site / Office": query += " onsite"
 
-        raw = ddg_search(query, days_key, num=12)
+        raw = searx_search(query, days_key, num=12)
 
         # Fallback: broader query if strict path returns nothing
         if not raw:
             fallback = f'site:{portal.lower()}.com "{role}" {location} jobs'
-            time.sleep(0.5)
-            raw = ddg_search(fallback, days_key, num=12)
+            raw = searx_search(fallback, days_key, num=12)
 
         for r in raw:
             title = clean_title(r.get("title", ""))
@@ -552,6 +561,30 @@ st.markdown("""
   </div>
 </div>
 """, unsafe_allow_html=True)
+
+# ── Quick diagnostics ──
+with st.expander("🔧 Connection Test (open if results are empty)"):
+    if st.button("▶ Run Test Search"):
+        with st.spinner("Testing SearXNG connection..."):
+            test_results = searx_search(
+                'site:naukri.com "data analyst" jobs Mumbai', "m", num=3
+            )
+        if test_results:
+            st.success(f"✅ Working! Got {len(test_results)} results.")
+            for r in test_results:
+                st.write(f"• [{r['title']}]({r['href']})")
+        else:
+            st.error("❌ All SearXNG instances failed. Showing raw response below for debugging:")
+            for inst in _SEARX_INSTANCES[:2]:
+                try:
+                    r = requests.get(
+                        f"{inst}/search",
+                        params={"q": "data analyst jobs", "format": "json"},
+                        headers=_SEARX_HEADERS, timeout=8
+                    )
+                    st.code(f"{inst} → HTTP {r.status_code}\n{r.text[:400]}")
+                except Exception as e:
+                    st.code(f"{inst} → ERROR: {e}")
 
 # ══════════════════════════════════════════════════════════════════
 #  SEARCH
