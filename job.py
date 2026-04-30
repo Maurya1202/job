@@ -290,11 +290,13 @@ _SERPER_DATE_MAP = {
 # ══════════════════════════════════════════════════════════════════
 def serper_search(query: str, tbs: str | None, num: int = 10) -> list[dict]:
     """Call Serper.dev Google Search API. Returns list of {title, href, body}."""
-    api_key = st.secrets.get("SERPER_API_KEY", "")
+    # Key priority: session_state (sidebar input) → st.secrets
+    api_key = (
+        st.session_state.get("serper_api_key", "")
+        or (st.secrets.get("SERPER_API_KEY", "") if hasattr(st, "secrets") else "")
+    )
     if not api_key:
-        st.error("⚠️ **SERPER_API_KEY not set.** Add it to your Streamlit secrets. "
-                 "Get a free key at https://serper.dev")
-        return []
+        return []   # warning already shown in sidebar
 
     payload = {"q": query, "num": num, "gl": "in", "hl": "en"}
     if tbs:
@@ -307,6 +309,12 @@ def serper_search(query: str, tbs: str | None, num: int = 10) -> list[dict]:
             json=payload,
             timeout=10,
         )
+        if resp.status_code == 401:
+            st.error("❌ Serper API key is invalid. Please check your key in the sidebar.")
+            return []
+        if resp.status_code == 429:
+            st.warning("⚠️ Serper rate limit hit — you've used your free quota. Check serper.dev.")
+            return []
         resp.raise_for_status()
         data = resp.json()
         results = []
@@ -317,7 +325,10 @@ def serper_search(query: str, tbs: str | None, num: int = 10) -> list[dict]:
                 "body":  item.get("snippet", ""),
             })
         return results
-    except Exception as e:
+    except requests.exceptions.Timeout:
+        st.warning("⚠️ Serper request timed out. Try again.")
+        return []
+    except Exception:
         return []
 
 # ══════════════════════════════════════════════════════════════════
@@ -502,6 +513,45 @@ with st.sidebar:
     st.markdown("## 💼 Search Filters")
     st.markdown("---")
 
+    # ── API KEY ── enter here if not set in Streamlit secrets
+    _secret_key = st.secrets.get("SERPER_API_KEY", "") if hasattr(st, "secrets") else ""
+    if _secret_key:
+        st.success("✅ Serper API key loaded from secrets")
+        api_key_input = _secret_key
+    else:
+        st.warning("⚠️ No API key in secrets")
+        api_key_input = st.text_input(
+            "🔑 Serper API Key",
+            type="password",
+            placeholder="Paste key from serper.dev",
+            help="Get free key at https://serper.dev (2500 searches/month free)"
+        )
+
+    if api_key_input:
+        st.session_state["serper_api_key"] = api_key_input
+        # Test button
+        if st.button("🧪 Test API Key"):
+            try:
+                r = requests.post(
+                    "https://google.serper.dev/search",
+                    headers={"X-API-KEY": api_key_input, "Content-Type": "application/json"},
+                    json={"q": "data analyst jobs India", "num": 1},
+                    timeout=8,
+                )
+                if r.status_code == 200 and r.json().get("organic"):
+                    st.success("✅ API key works! Ready to search.")
+                elif r.status_code == 401:
+                    st.error("❌ Invalid API key — check serper.dev")
+                else:
+                    st.error(f"❌ Error {r.status_code}: {r.text[:120]}")
+            except Exception as e:
+                st.error(f"❌ Connection failed: {e}")
+    else:
+        st.session_state["serper_api_key"] = ""
+        st.info("Get a free API key at [serper.dev](https://serper.dev)")
+
+    st.markdown("---")
+
     role       = st.selectbox("🎯 Role",       ROLES)
     location   = st.selectbox("📍 City",       CITIES)
     experience = st.selectbox("🎓 Experience", EXP)
@@ -551,7 +601,7 @@ with st.sidebar:
 st.markdown("""
 <div class="hero">
   <h1>🔍 DataJobs India</h1>
-  <p>Live job search across 13 portals · No API Key · No Login · Always Free</p>
+  <p>Live job search across 13 portals · Powered by Serper.dev · Always Free</p>
   <div class="chips">
     <span class="chip">Naukri</span>
     <span class="chip">LinkedIn</span>
@@ -574,6 +624,9 @@ st.markdown("""
 #  SEARCH
 # ══════════════════════════════════════════════════════════════════
 if go:
+    if not st.session_state.get("serper_api_key", ""):
+        st.error("❌ Please enter your Serper API key in the sidebar before searching. Get one free at https://serper.dev")
+        st.stop()
     selected = [p for p, v in portal_flags.items() if v]
     if not selected:
         st.warning("Select at least one portal.")
